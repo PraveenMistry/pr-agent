@@ -42,7 +42,7 @@ async function runReviewAgent(input) {
         try {
           const prompt = buildPrompt(chunk);
 
-          const raw = await analyzePR(prompt);
+          const raw = await withTimeout(analyzePR(prompt), 10000);
 
           const cleaned = cleanLLMResponse(raw);
           const parsed = safeParseJSON(cleaned);
@@ -81,6 +81,16 @@ async function runReviewAgent(input) {
     logError("Agent failed", err);
     return { success: false, error: err.message };
   }
+}
+
+
+async function withTimeout(promise, ms = 10000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout")), ms)
+    )
+  ]);
 }
 
 function mergeResults(results) {
