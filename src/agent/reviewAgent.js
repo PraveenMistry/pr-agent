@@ -6,6 +6,8 @@ const { cleanLLMResponse } = require("../utils/formatter");
 const { safeParseJSON } = require("../utils/jsonParser");
 const { chunkText } = require("../utils/chunker");
 const { logInfo, logError } = require("../utils/logger");
+const pLimit = require("p-limit");
+const limit = pLimit(3);
 
 async function runReviewAgent(input) {
   try {
@@ -22,37 +24,45 @@ async function runReviewAgent(input) {
     if (provider.error) {
       return { success: false, error: provider.error };
     }
-    logInfo("Step 2: Fetching PR diff...");
+    
     const diff = await provider.getPRDiff(owner, repo, prNumber);
     
-    logInfo("Step 3: Diff fetched")
-
+    
     if (!diff || diff.trim().length === 0) {
-      return { success: false, error: "Empty PR diff" };
+      return {
+        success: false,
+        error: "PR diff is empty or invalid"
+      };
     }
 
     const chunks = chunkText(diff);
-    let results = [];
 
-    logInfo("Step 4: Calling LLM...");
-    const promises = chunks.map(async (chunk) => {
-      try {
-        const prompt = buildPrompt(chunk);
-        const raw = await analyzePR(prompt);
+    const promises = chunks.map((chunk) =>
+      limit(async () => {
+        try {
+          const prompt = buildPrompt(chunk);
 
-        const cleaned = cleanLLMResponse(raw);
-        const parsed = safeParseJSON(cleaned);
+          const raw = await analyzePR(prompt);
 
-        return parsed;
-      } catch (err) {
-        logError("Chunk failed", err);
-        return null;
-      }
-    });
+          const cleaned = cleanLLMResponse(raw);
+          const parsed = safeParseJSON(cleaned);
 
-    results = (await Promise.all(promises)).filter(Boolean);
+          if (!parsed) {
+            logError("Invalid JSON from LLM", cleaned);
+            return null; // instead of continue
+          }
 
-    logInfo("Step 7: results ..");
+          return parsed;
+
+        } catch (err) {
+          logError("Chunk failed", err);
+          return null;
+        }
+      })
+    );
+
+    const results = (await Promise.all(promises)).filter(Boolean);
+
     const merged = mergeResults(results);
 
     const comment = `
