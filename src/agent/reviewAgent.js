@@ -1,19 +1,94 @@
 const { getProvider } = require("../providers/providerFactory");
 const { analyzePR } = require("../services/llmService");
 const { buildPrompt } = require("../utils/promptBuilder");
+const { validateReviewInput } = require("../utils/validator");
+const { cleanLLMResponse } = require("../utils/formatter");
+const { safeParseJSON } = require("../utils/jsonParser");
+const { chunkText } = require("../utils/chunker");
+const { logInfo, logError } = require("../utils/logger");
 
-async function runReviewAgent({ providerType, owner, repo, prNumber }) {
-  const provider = getProvider(providerType);
+async function runReviewAgent(input) {
+  try {
+    logInfo("Agent started", input);
 
-  const diff = await provider.getPRDiff(owner, repo, prNumber);
+    const validationError = validateReviewInput(input);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
 
-  const prompt = buildPrompt(diff);
+    const { providerType, owner, repo, prNumber } = input;
 
-  const analysis = await analyzePR(prompt);
+    const provider = getProvider(providerType);
+    if (provider.error) {
+      return { success: false, error: provider.error };
+    }
+    logInfo("Step 2: Fetching PR diff...");
+    const diff = await provider.getPRDiff(owner, repo, prNumber);
+    
+    logInfo("Step 3: Diff fetched")
 
-  const comment = `## 🤖 AI Review\n\n\`\`\`json\n${analysis}\n\`\`\``;
+    if (!diff || diff.trim().length === 0) {
+      return { success: false, error: "Empty PR diff" };
+    }
 
-  await provider.postComment(owner, repo, prNumber, comment);
+    const chunks = chunkText(diff);
+    let results = [];
+
+    logInfo("Step 4: Calling LLM...");
+    const promises = chunks.map(async (chunk) => {
+      try {
+        const prompt = buildPrompt(chunk);
+        const raw = await analyzePR(prompt);
+
+        const cleaned = cleanLLMResponse(raw);
+        const parsed = safeParseJSON(cleaned);
+
+        return parsed;
+      } catch (err) {
+        logError("Chunk failed", err);
+        return null;
+      }
+    });
+
+    results = (await Promise.all(promises)).filter(Boolean);
+
+    logInfo("Step 7: results ..");
+    const merged = mergeResults(results);
+
+    const comment = `
+      ## 🤖 AI PR Review
+
+      \`\`\`json
+      ${JSON.stringify(merged, null, 2)}
+      \`\`\`
+    `;
+
+    await provider.postComment(owner, repo, prNumber, comment);
+
+    return { success: true };
+
+  } catch (err) {
+    logError("Agent failed", err);
+    return { success: false, error: err.message };
+  }
+}
+
+function mergeResults(results) {
+  const merged = {
+    bugs: [],
+    performance_issues: [],
+    improvements: [],
+    index_suggestions: [],
+    edge_cases: []
+  };
+
+  for (const res of results) {
+    for (const key in merged) {
+      merged[key].push(...(res[key] || []));
+    }
+  }
+
+  return merged;
 }
 
 module.exports = { runReviewAgent };

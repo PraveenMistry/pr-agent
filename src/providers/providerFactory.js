@@ -8,7 +8,9 @@ function getProvider(type) {
     case "bitbucket":
       return new BitbucketProvider();
     default:
-      throw new Error("Unsupported provider");
+      return {
+        error: `Unsupported provider: ${type}. Supported: github, bitbucket`
+      };
   }
 }
 
