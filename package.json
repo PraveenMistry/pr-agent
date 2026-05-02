@@ -23,7 +23,7 @@
     "axios": "^1.6.0",
     "dotenv": "^16.4.0",
     "express": "^4.19.2",
-    "p-cap": "git+https://github.com/PraveenMistry/p-cap.git"
+    "promise-cap": "git+https://github.com/PraveenMistry/promise-cap.git"
   },
   "devDependencies": {
     "eslint": "^8.57.1",
