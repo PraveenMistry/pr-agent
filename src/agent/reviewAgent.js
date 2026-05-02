@@ -6,8 +6,13 @@ const { cleanLLMResponse } = require("../utils/formatter");
 const { safeParseJSON } = require("../utils/jsonParser");
 const { chunkText } = require("../utils/chunker");
 const { logInfo, logError } = require("../utils/logger");
-const pLimit = require("p-limit");
-const limit = pLimit(3);
+const pCap = require("p-cap");
+const { filterInsights } = require("../utils/filter");
+const { applySeverity } = require("../utils/severity");
+const { formatComment } = require("../utils/formatComment");
+
+
+const limit = pCap(3); // max 3 LLM calls at once
 
 async function runReviewAgent(input) {
   try {
@@ -19,62 +24,55 @@ async function runReviewAgent(input) {
     }
 
     const { providerType, owner, repo, prNumber } = input;
-
     const provider = getProvider(providerType);
     if (provider.error) {
       return { success: false, error: provider.error };
     }
-    
+
     const diff = await provider.getPRDiff(owner, repo, prNumber);
-    
-    
     if (!diff || diff.trim().length === 0) {
-      return {
-        success: false,
-        error: "PR diff is empty or invalid"
-      };
+      return { success: false, error: "PR diff is empty or invalid" };
     }
 
     const chunks = chunkText(diff);
 
     const promises = chunks.map((chunk) =>
-      limit(async () => {
-        try {
-          const prompt = buildPrompt(chunk);
-
-          const raw = await withTimeout(analyzePR(prompt), 10000);
-
-          const cleaned = cleanLLMResponse(raw);
-          const parsed = safeParseJSON(cleaned);
-
-          if (!parsed) {
-            logError("Invalid JSON from LLM", cleaned);
-            return null; // instead of continue
+      limit.run(
+        async (c) => {
+          try {
+            const prompt = buildPrompt(c);
+            const raw = await analyzePR(prompt);
+            const cleaned = cleanLLMResponse(raw);
+            const parsed = safeParseJSON(cleaned);
+            if (!parsed) {
+              logError("Invalid JSON from LLM", cleaned);
+              return null;
+            }
+            return parsed;
+          } catch (err) {
+            logError("Chunk failed", err);
+            return null;
           }
-
-          return parsed;
-
-        } catch (err) {
-          logError("Chunk failed", err);
-          return null;
-        }
-      })
+        },
+        { timeout: 10000 }, // built-in per-task timeout
+        chunk               // passed as arg `c` above
+      )
     );
 
     const results = (await Promise.all(promises)).filter(Boolean);
 
-    const merged = mergeResults(results);
+    // Merge all chunk outputs
+    let merged = mergeResults(results);
 
-    const comment = `
-      ## 🤖 AI PR Review
+    // Normalize / enforce severity
+    merged = applySeverity(merged);
 
-      \`\`\`json
-      ${JSON.stringify(merged, null, 2)}
-      \`\`\`
-    `;
+    // Remove generic / useless insights
+    merged = filterInsights(merged);
+
+    const comment = formatComment(merged);
 
     await provider.postComment(owner, repo, prNumber, comment);
-
     return { success: true };
 
   } catch (err) {
@@ -83,31 +81,19 @@ async function runReviewAgent(input) {
   }
 }
 
-
-async function withTimeout(promise, ms = 10000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout")), ms)
-    )
-  ]);
-}
-
 function mergeResults(results) {
   const merged = {
     bugs: [],
     performance_issues: [],
     improvements: [],
     index_suggestions: [],
-    edge_cases: []
+    edge_cases: [],
   };
-
   for (const res of results) {
     for (const key in merged) {
       merged[key].push(...(res[key] || []));
     }
   }
-
   return merged;
 }
 

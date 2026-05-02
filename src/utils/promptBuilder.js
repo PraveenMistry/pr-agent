@@ -1,26 +1,37 @@
 function buildPrompt(diff) {
-  if (!diff || typeof diff !== "string" || diff.trim().length === 0) {
-    throw new Error("Invalid diff provided to prompt builder");
+  if (!diff || typeof diff !== "string") {
+    throw new Error("Invalid diff");
   }
 
   return `
-    You are a senior backend engineer with 10+ years experience in Node.js, MongoDB, and scalable systems.
+    You are a senior backend engineer (10+ years experience).
 
-    Analyze the following PR diff and provide:
+    Analyze the PR diff and provide ONLY meaningful, actionable insights.
 
-    1. Bugs or logical issues
-    2. Performance issues
-    3. Code quality improvements
-    4. MongoDB index suggestions
-    5. Edge cases
+    STRICT RULES:
+    - DO NOT give generic advice (e.g., "improve code quality")
+    - ONLY report real issues with clear reasoning
+    - If no issue exists, return empty arrays
+    - Be concise and specific
 
-    Return ONLY valid JSON. No markdown.
+    For each issue:
+    - Assign severity: Critical / High / Medium / Low
+    - Explain WHY it is a problem
+    - Suggest a concrete fix
+
+    Return STRICT JSON (no markdown):
 
     {
-      "bugs": [],
+      "bugs": [
+        {
+          "severity": "Critical | High | Medium | Low",
+          "issue": "",
+          "reason": "",
+          "suggestion": ""
+        }
+      ],
       "performance_issues": [],
       "improvements": [],
-      "index_suggestions": [],
       "edge_cases": []
     }
 
