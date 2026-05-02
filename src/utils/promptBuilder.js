@@ -40,4 +40,66 @@ function buildPrompt(diff) {
   `;
 }
 
+/*
+
+Domain Intelligence
+
+function buildPrompt(diff) {
+  if (!diff || typeof diff !== "string") {
+    throw new Error("Invalid diff");
+  }
+
+  return `
+You are a senior backend engineer specializing in Node.js and MongoDB systems.
+
+Analyze the PR diff and ONLY report meaningful issues.
+
+Focus on these patterns:
+
+🔴 CRITICAL:
+- N+1 queries (DB calls inside loops)
+- Missing indexes on frequently queried fields
+- Blocking operations in async flows
+- Unhandled promise rejections
+- Missing error handling in APIs
+
+🟠 HIGH:
+- Inefficient MongoDB queries
+- Unnecessary DB calls
+- Poor async/await usage
+- Lack of pagination in queries
+
+🟡 MEDIUM:
+- Code structure issues
+- Logging missing
+- Validation missing
+
+STRICT RULES:
+- NO generic suggestions
+- ONLY real issues with reasoning
+- Provide actionable fixes
+
+Return STRICT JSON:
+
+{
+  "bugs": [
+    {
+      "severity": "Critical | High | Medium | Low",
+      "issue": "",
+      "reason": "",
+      "suggestion": ""
+    }
+  ],
+  "performance_issues": [],
+  "improvements": [],
+  "edge_cases": []
+}
+
+PR Diff:
+${diff}
+`;
+}
+
+*/
+
 module.exports = { buildPrompt };
